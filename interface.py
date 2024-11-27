@@ -1,152 +1,121 @@
 import gradio as gr
-import torch
 import torch.nn.functional as F
 import albumentations as A
-from albumentations.pytorch import ToTensorV2
-from torchvision import models
-import torch.nn as nn
-import cv2
-import numpy as np
-from PIL import Image
+from pipeline import *
 
-from models.classification_models.ResNet import *
-from models.segmentation_models.ResnetUnet import *
-
-def get_transforms(img_size=256):
-    val_transform = A.Compose([
-        A.LongestMaxSize(max_size=img_size),
-        A.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-        ToTensorV2(),
-    ])
-    return val_transform
-
-def load_models():
-    classification_model = resnet_model
-    classification_model.load_state_dict(torch.load('weights/classification_models/resnet50.pt'))
-    classification_model.eval()
-
-    segmentation_model = ResNetUnet()
-    checkpoint = torch.load('weights\segmentation_models\ResNetUnet_best.pt')
-    segmentation_model.load_state_dict(checkpoint['model_state_dict'])
-    segmentation_model.eval()
-
-    return classification_model, segmentation_model
-
-def pipeline(input_image):
-    classification_model, segmentation_model = load_models()
-    transform = get_transforms()
+def get_css(css_path):
+    with open(css_path, 'r') as f:
+        custom = f.read()
     
-    if isinstance(input_image, str):
-        image = cv2.imread(input_image)
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    else:
-        image = input_image
- 
-    transformed = transform(image=image)
-    input_tensor = transformed['image'].unsqueeze(0)
-    
-    with torch.inference_mode():
-        outputs = classification_model(input_tensor)
-        probs = F.softmax(outputs, dim=1)
-        pred_class = torch.argmax(probs, dim=1).item()
-
-    class_names = ['COVID', 'Non-COVID', 'Healthy']
-    prediction = class_names[pred_class]
-    confidence = probs[0][pred_class].item() * 100
-    
-    if prediction == 'COVID':
-        with torch.inference_mode():
-            output = segmentation_model(input_tensor)
-            output = torch.sigmoid(output)  
-            output = output.squeeze().cpu().numpy()  
-            binary_mask = (output > 0.5).astype(np.uint8) * 255
-            mask_resized = cv2.resize(binary_mask, (image.shape[1], image.shape[0]))
-            
-            overlay = np.zeros_like(image)
-            overlay[mask_resized > 0] = [255, 0, 0] 
-            alpha = 0.3 
-            blended = cv2.addWeighted(image, 1, overlay, alpha, 0)
-            
-            return [
-                f"The patient is diagnosed with {prediction}",
-                f"Confidence: {confidence:.2f}%",
-                blended,
-                None 
-            ]
-    elif prediction == 'Non-COVID':
-        return [
-            prediction,
-            f"Confidence: {confidence:.2f}%",
-            None,
-            "The patient is not diagnosed with COVID-19, but with other lung diseases :("
-        ]
-    return [
-        prediction,
-        f"Confidence: {confidence:.2f}%",
-        None,
-        "The patient is healthy with no infected area :)"
-    ]
+    return custom
 
 def create_interface():
-    with gr.Blocks(title="COVID-19 Lung Analysis", theme='lone17/kotaemon') as interface:
-        with gr.Column(variant="panel"):
-            gr.Markdown("# Lungs Radiography Analysis")
+    custom = get_css('design/design.css')
+    processor = Pipeline()
+
+    with gr.Blocks(css=custom, theme=gr.themes.Soft(primary_hue='teal', secondary_hue='blue')) as interface:
+        with gr.Column(variant="compact"):
+            gr.Markdown("# Lungs Radiography Analysis", elem_classes='heading')
             gr.Markdown("""
                 Upload/ Drop a chest X-ray image for COVID-19 diagnosis and analysis. 
             """)
-        
         with gr.Row(equal_height=True):
+            # [UPLOAD IMAGE SECTION]
             with gr.Column():
                 input_image = gr.Image(
                     label="Upload Chest X-ray",
-                    height=400
+                    height=400,
+                    elem_classes="upload-image"
                 )
-                submit_btn = gr.Button("Analyze Image", variant="primary", scale=1)
-            
-            with gr.Column(scale=1):                                
-                output_image = gr.Image(
-                    label="COVID-19 Analysis",
-                    visible=False,
-                    height=400
-                )
-                diagnosis_text = gr.Textbox(
-                    label="Diagnosis Details",
-                    visible=False,
-                    container=False
-                )
-                with gr.Row(equal_height=True):
-                    diagnosis_label = gr.Label(label="Diagnosis Conclusion")
-                    confidence_label = gr.Label(label="Confidence Score")
 
+                # [BUTTON]
+                with gr.Row():
+                    submit_btn = gr.Button("Analyze Image", variant="primary", elem_classes='primary-button', scale=2)
+                    clear_btn = gr.Button('Clear', variant='secondary', scale=1)
+                    
+            with gr.Column():
+                with gr.Group(elem_classes='results-container'):                    
+                    output_image = gr.Image(
+                        label="COVID-19 Analysis",
+                        visible=False,
+                        height=400
+                    )
+
+                with gr.Row(equal_height=True):
+                    diagnosis_label = gr.Label(label="Diagnosis Conclusion", elem_classes='results-container')
+                    confidence_label = gr.Label(label="Confidence Score", elem_classes='results-container')
+                
+                with gr.Row():
+                    diagnosis_text = gr.Textbox(
+                                label="Diagnosis Details",
+                                visible=False,
+                                container=False
+                            )
+        
+        # [HELP SECTION]    
         with gr.Accordion("Information", open=False):
-            gr.Markdown("""
-                ### How to Use
+                    gr.Markdown("""
+                ### Tutorial
                 1. Click the upload button/ Drag and drop a chest X-ray image.
                 2. Choose 'Analyze Image'.
                 3. Review the results:
                    - For COVID cases: View highlighted infection regions.
                    - For Non-COVID/Healthy cases: Review detailed diagnosis text.
             """)
-
-        def handle_prediction(image):
-            prediction, confidence, output_img, output_text = pipeline(image)
+                    
+        def clear_inputs():
+            return {
+                input_image: None,
+                output_image: gr.update(visible=False),
+                diagnosis_text: gr.update(visible=False),
+                diagnosis_label: None,
+                confidence_label: None
+            }
+        
+        def handle_prediction(image, opacity=0.4):            
+            prediction, confidence, output_img, analysis_text = processor.process_image(
+                image, overlay_opacity=opacity
+            )
+            
+            confidence_class = (
+                "confidence-high" if confidence > 90
+                else "confidence-medium" if confidence > 70
+                else "confidence-low"
+            )
+            print(confidence_class)
+            
             is_covid = output_img is not None
             
-            return (
-                prediction, 
-                confidence,  
-                gr.update(value=output_img, visible=is_covid),  
-                gr.update(value=output_text, visible=not is_covid)  
-            )
+            return {
+                diagnosis_label: prediction,
+                confidence_label: gr.update(
+                    value=f"Confidence: {confidence:.2f}%",
+                    elem_classes=[confidence_class]
+                ),
+                output_image: gr.update(value=output_img, visible=is_covid),
+                diagnosis_text: gr.update(value=analysis_text, visible=True)
+            }
 
         submit_btn.click(
             fn=handle_prediction,
             inputs=[input_image],
             outputs=[
-                diagnosis_label,    
-                confidence_label,   
-                output_image,      
-                diagnosis_text   
+                diagnosis_label,
+                confidence_label,
+                output_image,
+                diagnosis_text,
+            ]
+        )
+        
+        clear_btn.click(
+            fn=clear_inputs,
+            inputs=[],
+            outputs=[
+                input_image,
+                output_image,
+                diagnosis_text,
+                diagnosis_label,
+                confidence_label
             ]
         )
         
