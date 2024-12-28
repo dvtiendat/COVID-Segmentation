@@ -1,3 +1,5 @@
 project1_datdvt
 flagged
 __pycache__
+.venv
+.gradio

@@ -11,6 +11,8 @@ from models.classification_models.ResNet import *
 from models.segmentation_models.ResnetUnet import *
 from models.segmentation_models.AttentionUnet import *
 
+warnings.filterwarnings("ignore")
+
 class Pipeline:
     def __init__(self, img_size=256):
         self.transform = self._get_transforms(img_size)

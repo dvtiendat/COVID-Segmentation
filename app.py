@@ -24,7 +24,7 @@ def create_interface():
             # [MODEL SELECTION]
             with gr.Column(scale=0.2):
                 classification_dropdown = gr.Dropdown(
-                    choices=['ResNet50', 'ResNet18'],
+                    choices=['ResNet50', 'VGG16'],
                     value='ResNet50',
                     label='Classification Model',
                 )
