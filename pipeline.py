@@ -35,11 +35,23 @@ class Pipeline:
             self.classification_model = models.resnet50()
             self.classification_model.fc = nn.Linear(self.classification_model.fc.in_features, 3)
             self.classification_model.load_state_dict(torch.load('weights/classification_models/ResNet50.pt', map_location = torch.device('cpu')), strict= False)
-        elif classification_model_name == 'ResNet18':
-            self.classification_model = models.resnet18()
-            self.classification_model.fc = nn.Linear(self.classification_model.fc.in_features, 3)
-            self.classification_model.load_state_dict(torch.load('weights/classification_models/ResNet18.pt', map_location = torch.device('cpu')), strict= False)
-        
+        elif classification_model_name == 'VGG16':
+            self.classification_model = models.vgg16(pretrained=False)
+            base_features = nn.Sequential(*list(self.classification_model.features))
+            self.classification_model = nn.Sequential(
+                base_features,
+                nn.AdaptiveAvgPool2d((1, 1)),
+                nn.Flatten(),
+                nn.Linear(512, 256),
+                nn.ReLU(),
+                nn.Dropout(0.5),
+                nn.Linear(256, 256),
+                nn.ReLU(),
+                nn.Dropout(0.5),
+                nn.Linear(256, 3),
+            )
+            self.classification_model.load_state_dict(torch.load('weights/classification_models/VGG16.pth', map_location = torch.device('cpu')))
+
         self.classification_model.eval()
 
         if segmentation_model_name == 'ResNetUnet':
